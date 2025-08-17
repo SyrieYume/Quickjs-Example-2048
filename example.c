@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <libgen.h>
 #include <windows.h>
 #include <conio.h>
 #include "quickjs/quickjs.h"
@@ -111,7 +110,7 @@ JSValue JS_EvalFile(JSContext* ctx, wchar_t* wszFilepath, int evalFlags) {
     char szFilepath[256];
     WideCharToMultiByte(CP_UTF8, 0, wszFilepath, -1, szFilepath, 255, NULL, NULL);
 
-    JSValue result = JS_Eval(ctx, jsCode, fileSize, basename(szFilepath), evalFlags);
+    JSValue result = JS_Eval(ctx, jsCode, fileSize, szFilepath, evalFlags);
 
     free(jsCode);
     return result;
