@@ -10,6 +10,7 @@
 #define PTHREAD_CREATE_JOINABLE 0
 #define PTHREAD_CREATE_DETACHED 0x04
 #define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
 
 // 魔法数字：用于将Windows纪元（1601年1月1日）转换为Unix纪元（1970年1月1日）
 #define UNIX_EPOCH_OFFSET 116444736000000000ULL
@@ -38,8 +39,12 @@ typedef struct {
 #ifndef _TIMESPEC_DEFINED
 #define _TIMESPEC_DEFINED
 struct timespec {
-    long tv_sec;
+    long long tv_sec;
     long tv_nsec;
+};
+struct _timespec64 {
+  long long tv_sec;
+  long tv_nsec;
 };
 #endif
 
@@ -68,7 +73,6 @@ WINPTHREAD_API int pthread_mutex_unlock(pthread_mutex_t *m) {
     LeaveCriticalSection(m);
     return 0;
 }
-
 
 WINPTHREAD_API int pthread_cond_init(pthread_cond_t *cv, const pthread_condattr_t *a) {
     InitializeConditionVariable(cv);
@@ -150,25 +154,42 @@ WINPTHREAD_API int pthread_attr_destroy(pthread_attr_t *attr) {
 }
 
 WINPTHREAD_API int __cdecl clock_gettime(clockid_t clock_id, struct timespec *tp) {
-    if (clock_id != CLOCK_REALTIME) {
-        errno = EINVAL;
-        return -1;
+    if (!tp) return -1;
+
+    switch (clock_id) {
+        case CLOCK_MONOTONIC:
+            LARGE_INTEGER performance_counter;
+            LARGE_INTEGER performance_frequency;
+
+            if (!QueryPerformanceFrequency(&performance_frequency))
+                return -1;
+
+            QueryPerformanceCounter(&performance_counter);
+
+            tp->tv_sec = performance_counter.QuadPart / performance_frequency.QuadPart;
+            tp->tv_nsec = ((performance_counter.QuadPart % performance_frequency.QuadPart) * 1000000000) / performance_frequency.QuadPart;
+            return 0;
+
+        case CLOCK_REALTIME:
+            FILETIME ft;
+            ULARGE_INTEGER uli;
+
+            GetSystemTimeAsFileTime(&ft);
+            uli.LowPart = ft.dwLowDateTime;
+            uli.HighPart = ft.dwHighDateTime;
+
+            uli.QuadPart -= UNIX_EPOCH_OFFSET;
+            tp->tv_sec = uli.QuadPart / 10000000;
+            tp->tv_nsec = (uli.QuadPart % 10000000) * 100;
+            return 0;
+            
+        default: return -1;
     }
-
-    FILETIME ft;
-    ULARGE_INTEGER uli;
-
-    GetSystemTimeAsFileTime(&ft);
-    uli.LowPart = ft.dwLowDateTime;
-    uli.HighPart = ft.dwHighDateTime;
-
-    uli.QuadPart -= UNIX_EPOCH_OFFSET;
-    tp->tv_sec = (long)(uli.QuadPart / 10000000L);
-    tp->tv_nsec = (long)(uli.QuadPart % 10000000L) * 100;
-
-    return 0;
 }
 
+WINPTHREAD_API int __cdecl clock_gettime64(clockid_t clock_id, struct _timespec64 *tp) {
+    return clock_gettime(clock_id, (struct timespec*)tp);
+}
 
 WINPTHREAD_API int pthread_cond_timedwait(pthread_cond_t *cv, pthread_mutex_t *external_mutex, const struct timespec *t) {
     struct timespec current_ts;
@@ -192,4 +213,8 @@ WINPTHREAD_API int pthread_cond_timedwait(pthread_cond_t *cv, pthread_mutex_t *e
         return ETIMEDOUT;
 
     return EINVAL;
+}
+
+WINPTHREAD_API int pthread_cond_timedwait64(pthread_cond_t *cv, pthread_mutex_t *external_mutex, const struct _timespec64 *t) {
+    return pthread_cond_timedwait(cv, external_mutex, (struct timespec*)t);
 }
